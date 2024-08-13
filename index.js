@@ -13,7 +13,7 @@ const path = require('path')
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
 // middleware
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:5174'],
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'https://hotelnest-5ebe9.web.app'],
   credentials: true,
   optionSuccessStatus: 200,
 }
@@ -67,6 +67,67 @@ async function run() {
     const roomsCollection = await client.db('hotelNest').collection('rooms')
     const usersCollection = await client.db('hotelNest').collection('users')
     const bookingsCollection = await client.db('hotelNest').collection('bookings')
+
+    // Admin Verification
+    const verifyAdmin = async (req, res, next) => {
+      const { email } = req.user;
+      const data = await usersCollection.findOne({ email })
+      if (data && data.role === 'admin') {
+        next()
+      } else {
+        return res.status(401).send({ message: 'Unauthorized Access!!!' })
+      }
+    }
+    const verifyHost = async (req, res, next) => {
+      const { email } = req.user;
+      const data = await usersCollection.findOne({ email })
+      if (data && data.role === 'host') {
+        next()
+      } else {
+        return res.status(401).send({ message: 'Unauthorized Access!!!' })
+      }
+    }
+
+    app.get('/admin-stat', verifyToken, verifyAdmin, async (req, res) => {
+      const totalRoom = await roomsCollection.countDocuments();
+      const totalUser = await usersCollection.countDocuments();
+      const totalBookings = await bookingsCollection.find({}, { projection: { totalPrice: 1, time: 1 } }).toArray();
+      const totalPrice = totalBookings.reduce((sum, booking) => sum + booking.totalPrice, 0)
+      const chartData = totalBookings.map(booking => {
+        const day = new Date(booking.time).getDay()
+        const month = new Date(booking.time).getMonth()
+        return [`${day}/${month}`, booking.totalPrice]
+      })
+      chartData.unshift(['Day', 'Sales'])
+      res.send({ totalRoom, totalBooking: totalBookings.length, totalUser, totalPrice, chartData })
+    })
+    app.get('/host-stat', verifyToken, verifyHost, async (req, res) => {
+      const { email } = req.user
+      const totalRoom = await roomsCollection.countDocuments({ 'host.email': email });
+
+      const totalBookings = await bookingsCollection.find({ 'host.email': email }, { projection: { totalPrice: 1, time: 1 } }).toArray();
+      const totalPrice = totalBookings.reduce((sum, booking) => sum + booking.totalPrice, 0)
+      const chartData = totalBookings.map(booking => {
+        const day = new Date(booking.time).getDay()
+        const month = new Date(booking.time).getMonth()
+        return [`${day}/${month}`, booking.totalPrice]
+      })
+      chartData.unshift(['Day', 'Sales'])
+      res.send({ totalRoom, totalBooking: totalBookings.length, totalPrice, chartData })
+    })
+    app.get('/guest-stat',verifyToken, async (req, res) => {
+     const { email} = req.user
+      const totalBookings = await bookingsCollection.find({'guest.email': email}, { projection: { totalPrice: 1, time: 1 } }).toArray();
+      const totalPrice = totalBookings.reduce((sum, booking) => sum + booking.totalPrice, 0)
+      const chartData = totalBookings.map(booking => {
+        const day = new Date(booking.time).getDay()
+        const month = new Date(booking.time).getMonth()
+        return [`${day}/${month}`, booking.totalPrice]
+      })
+      chartData.unshift(['Day', 'Sales'])
+      res.send({  totalBooking: totalBookings.length,  totalPrice, chartData })
+    })
+
     // Users
 
     app.get('/users', async (req, res) => {
@@ -136,23 +197,35 @@ async function run() {
       res.send(result)
     })
 
-    app.get('/my-bookings/:email', async(req, res) => {
+    app.get('/my-bookings/:email', async (req, res) => {
       const email = req.params.email;
-      const query = { 'guest.email': email}
+      const query = { 'guest.email': email }
+      const result = await bookingsCollection.find(query).toArray();
+      res.send(result)
+    })
+    app.get('/manage-bookings/:email', async (req, res) => {
+      const email = req.params.email;
+      const query = { 'host.email': email }
       const result = await bookingsCollection.find(query).toArray();
       res.send(result)
     })
 
-    app.patch('/room-update/:id', async(req, res) => {
+    app.delete('/booking/:id', async (req, res) => {
       const id = req.params.id;
-      const { booked} = req.body
-      const options = { upsert : true}
+      const result = await bookingsCollection.deleteOne({ _id: new ObjectId(id) })
+      res.send(result)
+    })
+
+    app.patch('/room-update/:id', async (req, res) => {
+      const id = req.params.id;
+      const { booked } = req.body
+      const options = { upsert: true }
       const updatedDoc = {
         $set: {
           booked
         }
       }
-      const result = await roomsCollection.updateOne({_id: new ObjectId(id)}, updatedDoc, options)
+      const result = await roomsCollection.updateOne({ _id: new ObjectId(id) }, updatedDoc, options)
       res.send(result)
     })
 
