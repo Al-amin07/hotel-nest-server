@@ -191,6 +191,11 @@ async function run() {
       });
     });
 
+    app.get('/gallery', async(req, res) => {
+      const result = await roomsCollection.find({}, {projection: {image: 1}}).toArray()
+      res.send(result)
+    })
+
     app.post('/booking', async (req, res) => {
       const { bookingInfo } = req.body;
       const result = await bookingsCollection.insertOne(bookingInfo)
